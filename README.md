@@ -30,6 +30,31 @@ called base (compactness). Details: [`k562_agft_benchmark/`](k562_agft_benchmark
 efficient per base), and far ahead of MoDISco-based callers on both coverage and
 recovery.
 
+### On raw attribution maps (no SEAM)
+
+The table above denoises each map with SEAM first. Re-running every method on the
+**raw ISM maps** instead (83 sequences with a raw map; recovery is the median over
+the sequences each method actually annotates, so **coverage is reported alongside
+it**):
+
+| Method | SEAM foreground | Raw ISM map |
+|---|---|---|
+| **AutoSituate (two-stage)** | 96.5% · 84/84 · 56 bp | **95.9% · 83/83 · 57 bp** |
+| FIMO (JASPAR2026) | 90.5% · 84/84 · 160 bp | 89.3% · 83/83 · 160 bp |
+| TF-MoDISco seqlets | 65.9% · 54/84 · 64 bp | 55.6% · **33/83** · 41 bp |
+| TF-MoDISco-lite seqlets | 69.0% · 57/84 · 67 bp | 55.3% · **36/83** · 41 bp |
+| recursive seqlets | 17.5% · 31/84 · 17 bp | 16.1% · 33/83 · 17 bp |
+| MoDISco hits | 42.6% · 30/84 · 50 bp | **0/83** (no patterns found) |
+| naive (mean+2σ) | 4.7% · 84/84 · 10 bp | 3.2% · 83/83 · 11 bp |
+
+AutoSituate is **unchanged on raw maps** (96.5% → 95.9%), as is the map-blind FIMO.
+The MoDISco/seqlet callers **degrade**: they annotate far fewer sequences (e.g.
+TF-MoDISco 54 → 33) and recover less per annotated sequence (~66% → ~56%), and
+MoDISco discovery finds no patterns at all — so on the raw map their *per-panel*
+median recovery is 0% (fewer than half the sequences get any call). SEAM
+denoising was doing that cleanup for them; AutoSituate validates against the model
+and does not need it. Numbers: [`k562_agft_benchmark/results/ism/`](k562_agft_benchmark/results/ism/).
+
 ## Layout
 
 - [`k562_agft_benchmark/`](k562_agft_benchmark/) — head-to-head benchmark of the
