@@ -1,0 +1,42 @@
+# --- Vendored hackathon project (its own git repo + bundled venv + zip + model weights) ---
+algo_impliment/orig_impliment/hackathon_project/
+algo_impliment/orig_impliment/*.zip
+
+# --- Python envs ---
+*venv*/
+.venv/
+env/
+.conda/
+
+# --- Python caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- Archives ---
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# --- Large data / model weights (keep these out; stage explicitly if ever needed) ---
+*.h5
+*.hdf5
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# --- SLURM logs ---
+**/slurm/logs/
+*.out
+*.err
+
+# --- wandb ---
+wandb/
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+*.swp

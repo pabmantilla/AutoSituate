@@ -1,0 +1,7 @@
+n_sequences=84
+num_shuffles=100
+seed=42
+foreground_map=foreground_scaled.npy
+ckpt=/grid/koo/home/shared/models/alphagenome_encoder/torch/mpra_K562/finetuned_encoder.pt
+jaspar=/grid/koo/home/pmantill/projects/Virtual_Experiments/Hippo_axis/Hippo_dependency_mpra/eigen-interactions/motif_db/JASPAR2026_vertebrates.meme
+activity_tertiles=(-0.7000,0.7000)

@@ -1,0 +1,6 @@
+method=two_stage
+n_seqs=84
+target_recovery=0.90
+num_shuffles=100
+seed=42
+ckpt=/grid/koo/home/shared/models/alphagenome_encoder/torch/mpra_K562/finetuned_encoder.pt
