@@ -30,6 +30,26 @@ called base (compactness). Details: [`k562_agft_benchmark/`](k562_agft_benchmark
 efficient per base), and far ahead of MoDISco-based callers on both coverage and
 recovery.
 
+### Works on raw attribution maps — no SEAM needed
+
+The table above denoises each map with SEAM, which is expensive. AutoSituate does
+not need it: run directly on the **raw ISM attribution maps**, it stays essentially
+tied with its own SEAM-foreground result, while the other map-based callers
+**collapse** — they only worked because SEAM cleaned the map for them.
+
+| Method | On SEAM foregrounds | On raw ISM maps |
+|---|---|---|
+| **AutoSituate (two-stage)** | **96.5%** (56 bp) | **95.9%** (57 bp) |
+| TF-MoDISco-lite seqlets | 69.0% (67 bp) | 0% (collapses) |
+| TF-MoDISco seqlets | 65.9% (64.5 bp) | 0% (collapses) |
+| recursive seqlets | 17.5% (17 bp) | 0% (collapses) |
+| FIMO (JASPAR2026) | 90.5% (159.5 bp) | 89.3% (160 bp) — ignores the map |
+
+So AutoSituate is both (a) **as good on raw maps as on SEAM-denoised ones**, and
+(b) the only map-based method that still works there — letting you skip the
+expensive SEAM step entirely. (FIMO is map-blind by construction, so it is
+unchanged but remains ~3× larger per annotation.)
+
 ## Layout
 
 - [`k562_agft_benchmark/`](k562_agft_benchmark/) — head-to-head benchmark of the
