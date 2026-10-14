@@ -49,10 +49,21 @@ from two_stage_adapter import K562Adapter  # noqa: E402
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from seeders import SEEDERS          # noqa: E402
-from stage1_variants import make_stage1  # noqa: E402
+from stage1_variants import make_stage1, make_stage1_signed, make_stage1_abs  # noqa: E402
+from counter_element import rescue_counter_element  # noqa: E402
 
 OUT = HERE / "results"
 TARGET = 0.90
+
+# Variant -> (seeder name, Stage-1 builder). Default builder is make_stage1 and the
+# seeder shares the variant's name. `signed_nec` is the 5th variant: a two-sided
+# seed with sign-aware necessity (flipped once per sequence off wt_signal), so
+# repressors are kept instead of pruned. `abs_nec` is the 6th: same two-sided seed
+# but necessity magnitude is resolved PER REGION, so repressors and activators are
+# both grown/kept regardless of the sequence's overall direction.
+STAGE1_BUILDERS = {"signed_nec": make_stage1_signed, "abs_nec": make_stage1_abs}
+SEEDER_FOR = {"signed_nec": "naive_abs", "abs_nec": "naive_abs"}
+ALL_VARIANTS = list(SEEDERS) + ["signed_nec", "abs_nec"]
 
 
 def attr_ism(rec):
@@ -86,8 +97,14 @@ def _bp(regs):
 
 def main():
     variants = (os.environ["VARIANTS"].split(",")
-                if os.environ.get("VARIANTS") else list(SEEDERS))
+                if os.environ.get("VARIANTS") else ALL_VARIANTS)
     limit = int(os.environ.get("LIMIT", "0")) or None
+    # EXPERIMENTAL post-sufficiency repressor/counter-element gate (off by default).
+    # When on, outputs get a _rescue suffix so the baseline results are left intact.
+    rescue = os.environ.get("RESCUE", "0") not in ("0", "", "false", "False")
+    rescue_tol = float(os.environ.get("RESCUE_TOL", "0.05"))
+    rescue_max_add = int(os.environ.get("RESCUE_MAX_ADD", "2"))
+    sfx = "_rescue" if rescue else ""
 
     recs = data.load_dataset()
     bins, (lo, hi) = data.activity_bins(recs)
@@ -95,6 +112,9 @@ def main():
     if limit:
         usable = usable[:limit]
     print(f"Variants: {variants}", flush=True)
+    if rescue:
+        print(f"RESCUE on: counter-element gate (tol={rescue_tol}, "
+              f"max_add={rescue_max_add}); writing *{sfx} outputs", flush=True)
     print(f"{len(usable)}/{len(recs)} sequences have a raw ISM map | "
           f"activity cutoffs <= {lo:.2f} rep, >= {hi:.2f} act", flush=True)
 
@@ -107,10 +127,12 @@ def main():
     summary_rows = []
 
     for vname in variants:
-        if vname not in SEEDERS:
+        seeder_name = SEEDER_FOR.get(vname, vname)
+        if seeder_name not in SEEDERS:
             print(f"  !! unknown variant {vname!r}, skipping", flush=True)
             continue
-        TSA.stage1_necessity = make_stage1(SEEDERS[vname])   # swap ONLY Stage 1
+        builder = STAGE1_BUILDERS.get(vname, make_stage1)
+        TSA.stage1_necessity = builder(SEEDERS[seeder_name])   # swap ONLY Stage 1
         vout = OUT / vname
         vout.mkdir(parents=True, exist_ok=True)
         print(f"\n===== variant: {vname} =====", flush=True)
@@ -149,6 +171,21 @@ def main():
                 "recovery": res["recovery"]["final"],      # alias (benchmark column name)
                 "status": res["status"], "n_experiments": res["n_experiments"],
             }
+
+            counter = None
+            if rescue:
+                counter = rescue_counter_element(
+                    res, attr, rec["var"], num_std=1.5,
+                    tol=rescue_tol, max_add=rescue_max_add)
+                ce_bp = _bp([(c["start"], c["end"]) for c in counter["counter_elements"]])
+                rec_row.update({
+                    "rescue_triggered": counter["triggered"],
+                    "rec_rescued": counter["rec_after"],
+                    "n_counter": len(counter["counter_elements"]),
+                    "counter_bp": ce_bp,
+                    "rescue_experiments": counter["n_experiments_added"],
+                })
+
             rows.append(rec_row)
             seed_rows.append(rec_row)
 
@@ -156,20 +193,25 @@ def main():
             ann_regions.append(regs)
             native.append({"id": rec["id"], "status": res["status"],
                            "recovery": res["recovery"],
-                           "n_experiments": res["n_experiments"]})
+                           "n_experiments": res["n_experiments"],
+                           "counter": counter})
             classified[rec["id"]] = cls
-            print(f"  [{rec['id']}] {bins[ri]} seeds={len(res['naive'])} "
-                  f"core={core_bp}bp ctx={ctx_bp}bp final={res['recovery']['final']:.0%} "
-                  f"{res['status']} ({time.time()-t0:.1f}s)", flush=True)
+            msg = (f"  [{rec['id']}] {bins[ri]} seeds={len(res['naive'])} "
+                   f"core={core_bp}bp ctx={ctx_bp}bp final={res['recovery']['final']:.0%} "
+                   f"{res['status']}")
+            if rescue and counter["triggered"]:
+                msg += (f" | RESCUE {counter['rec_before']:.0%}->{counter['rec_after']:.0%} "
+                        f"(+{len(counter['counter_elements'])} {'none' if not counter['counter_elements'] else counter['counter_elements'][0]['sign']})")
+            print(msg + f" ({time.time()-t0:.1f}s)", flush=True)
 
         df = pd.DataFrame(rows)
-        df.to_csv(vout / "per_sequence.csv", index=False)
-        with open(vout / "annotations.pkl", "wb") as fh:
+        df.to_csv(vout / f"per_sequence{sfx}.csv", index=False)
+        with open(vout / f"annotations{sfx}.pkl", "wb") as fh:
             pickle.dump({"ids": ann_ids, "regions": {vname: ann_regions},
                          "native": native, "classified": classified}, fh)
 
         # per-variant medians (annotated seqs = all; some may be empty-core)
-        summary_rows.append({
+        summ_row = {
             "variant": vname, "n_seq": len(df),
             "med_n_seeds": df["n_seeds"].median(),
             "med_seed_bp": df["seed_bp"].median(),
@@ -183,14 +225,25 @@ def main():
             "med_n_experiments": df["n_experiments"].median(),
             "pct_captured_stage1": float((df["status"] == "captured_at_stage1").mean()),
             "pct_captured_buffered": float((df["status"] == "captured_by_buffered").mean()),
-        })
-        print(f"  -> wrote {vout/'per_sequence.csv'}", flush=True)
+        }
+        if rescue:
+            over = df["rec_final"] > 1.0 + rescue_tol
+            after = df["rec_rescued"] > 1.0 + rescue_tol
+            summ_row.update({
+                "n_overshoot": int(over.sum()),
+                "n_overshoot_after": int(after.sum()),
+                "pct_overshoot_fixed": float((over & ~after).sum() / over.sum()) if over.sum() else 0.0,
+                "med_abs_rec_err_before": float((df.loc[over, "rec_final"] - 1.0).abs().median()) if over.sum() else 0.0,
+                "med_abs_rec_err_after": float((df.loc[over, "rec_rescued"] - 1.0).abs().median()) if over.sum() else 0.0,
+            })
+        summary_rows.append(summ_row)
+        print(f"  -> wrote {vout / ('per_sequence' + sfx + '.csv')}", flush=True)
 
-    pd.DataFrame(seed_rows).to_csv(OUT / "seed_comparison.csv", index=False)
+    pd.DataFrame(seed_rows).to_csv(OUT / f"seed_comparison{sfx}.csv", index=False)
     summ = pd.DataFrame(summary_rows)
-    summ.to_csv(OUT / "explore_summary.csv", index=False)
-    print("\nwrote", OUT / "seed_comparison.csv", flush=True)
-    print("wrote", OUT / "explore_summary.csv", flush=True)
+    summ.to_csv(OUT / f"explore_summary{sfx}.csv", index=False)
+    print("\nwrote", OUT / f"seed_comparison{sfx}.csv", flush=True)
+    print("wrote", OUT / f"explore_summary{sfx}.csv", flush=True)
     print("\n" + summ.round(3).to_string(index=False), flush=True)
 
 
